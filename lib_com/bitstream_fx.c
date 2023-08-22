@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 #include "stl.h"
 #include "cnst_fx.h"        /* Common constants                       */
 #include "prot_fx.h"        /* Function prototypes                    */
@@ -516,9 +517,23 @@ void write_indices_fx(
         /* Create and write ToC header */
         /*  qbit always  set to  1 on encoder side  for AMRWBIO ,  no qbit in use for EVS, but set to 0(bad)  */
         header = (UWord8)(st_fx->Opt_AMR_WB_fx << 5 | st_fx->Opt_AMR_WB_fx << 4 | rate2EVSmode(st_fx->nb_bits_tot_fx * 50));
+        if(file != NULL)
         fwrite( &header, sizeof(UWord8), 1, file );
+
+		
         /* Write speech bits */
+        if(file != NULL)
         fwrite( pFrame, sizeof(UWord8), (pFrame_size + 7)>>3, file );
+        
+		int headerSize = 1 * sizeof(UWord8);
+		int bodySize = ((pFrame_size + 7) >> 3) * sizeof(UWord8);
+
+		st_fx->outData[0] = header;
+		memcpy(st_fx->outData + headerSize, pFrame, bodySize);
+
+		st_fx->outDataLen = headerSize + bodySize;
+
+		
     }
 
     /* Clearing of indices */
@@ -532,7 +547,11 @@ void write_indices_fx(
     if( st_fx->bitstreamformat == G192 )
     {
         /* write the serial stream into file */
+        if(file != NULL)
         fwrite( stream, sizeof(unsigned short), 2+stream[1], file );
+     
+        st_fx->outDataLenG192 = sizeof(unsigned short)*(2+stream[1]);
+        memcpy(st_fx->outDataG192,stream, st_fx->outDataLenG192);
     }
     /* reset index pointers */
     st_fx->nb_bits_tot_fx = 0;
@@ -1275,6 +1294,253 @@ Word32 BIT_ALLOC_IDX_16KHZ_fx(Word32 brate, Word16 ctype, Word16 sfrm, Word16 tc
     return L_temp;
 }
 
+/*-------------------------------------------------------------------*
+ * read_indices_fx_real()
+ *
+ * Read indices from an ITU-T G.192 bitstream to the buffer
+ * Simulate packet losses by inserting frame erasures
+ *-------------------------------------------------------------------*/
+
+Word16 read_indices_fx_real(                /* o  : 1 = reading OK, 0 = problem            */
+    Decoder_State_fx *st,                /* i/o: decoder state structure                */
+    UWord16 *data,              /* i  : evs data                         */
+    Word16 dataLen,              /* i :data len                           */
+    Word16 rew_flag            /* i  : rewind flag */
+)
+{
+    Word16 k;
+    UWord16 utmp, stream[2+MAX_BITS_PER_FRAME], *pt_stream,*bit_stream_ptr;
+	Word16 num_bits;
+    Word32 total_brate;
+    Word32 L_tmp;
+    Word16 curr_ft_good_sp, curr_ft_bad_sp;
+    Word16 g192_sid_first,sid_upd_bad, sid_update;
+    Word16 speech_bad, speech_lost;
+
+    st->bfi_fx = 0;
+    st->BER_detect = 0;
+    st->mdct_sw_enable = 0;
+    st->mdct_sw = 0;
+    reset_indices_dec_fx( st );
+
+	Word16 i;
+
+    /* read the Sync Header field from the bitstream */
+    /* in case rew_flag is set, read until first good frame is encountered */
+    do
+    {
+		//Sync header
+		utmp = data[0];
+		UWord16 headerSize = sizeof(unsigned short) * 1;
+		
+
+		 /* set the BFI indicator according the value of Sync Header */
+		 if (sub(utmp, SYNC_BAD_FRAME) == 0)
+		 {
+			 st->bfi_fx = 1;
+		 }
+
+
+		 else
+		 {
+			 st->bfi_fx = 0;
+		 }
+
+		
+		 //Frame Length field from the bitstream
+		 memcpy(&num_bits, data + headerSize, sizeof(unsigned short));
+
+		 UWord16 offsetSize = headerSize + sizeof(unsigned short) * 1;
+
+		 pt_stream = stream;
+
+		 memcpy(pt_stream, data + offsetSize, num_bits* sizeof(unsigned short));
+       
+        /* convert the frame length to total bitrate */
+        total_brate = (long)(num_bits* 50);
+
+        /* read ITU-T G.192 serial stream of indices from file to the local buffer */
+        /* Validate that the G.192 length is within the defined  bit rate range
+        to not allow writing past the end of the "stream" buffer  */
+        if( num_bits > MAX_BITS_PER_FRAME )
+        {
+            fprintf(stderr, "\nError, too large G.192 frame (size(%d))! Exiting ! \n", num_bits);
+            exit(-1);
+        }
+
+        /*  verify that a  valid  num bits value  is present in the G.192 file */
+        /*  only AMRWB or EVS bit rates  or 0(NO DATA)  are  allowed  in G.192 file frame reading  */
+        if( rate2EVSmode(total_brate) < 0 ) /* negative value means that a valid rate was not found */
+        {
+            fprintf(stderr, "\nError, illegal bit rate (%d) in  the  G.192 frame ! Exiting ! \n", total_brate);
+            exit(-1);
+        }
+        
+
+    }
+    while ( rew_flag && (st->bfi_fx || L_sub(total_brate,2800) < 0) );
+
+    /* G.192 RX DTX handler*/
+    if( !rew_flag )
+    {
+        /* handle SID_FIRST, SID_BAD, SPEECH_LOST,  NO_DATA as properly  as possible for the ITU-T  G.192 format  */
+
+        /* (total_brate, bfi , st_CNG)   =  rx_handler(received frame type, [previous frame type],  past CNG state, past core) */
+        curr_ft_good_sp = 0;
+        curr_ft_bad_sp  = 0;
+
+        if( total_brate > SID_2k40 )
+        {
+            if( st->bfi_fx == 0 )
+            {
+                curr_ft_good_sp = 1;
+            }
+            else
+            {
+                curr_ft_bad_sp = 1;
+            }
+        }
+        sid_update = 0;
+        sid_upd_bad = 0;
+
+        if( total_brate == SID_1k75 || total_brate == SID_2k40 )
+        {
+            if( st->bfi_fx == 0 )
+            {
+                sid_update = 1;
+            }
+            else
+            {
+                sid_upd_bad = 1;   /* may happen in CS , corrupt but detected sid frame  */
+            }
+        }
+
+        /* AMRWB  26.173 G.192  file reader (read_serial) does not declare/use SID_BAD ft,
+           it declares every bad synch marked frame initially as a lost_speech frame,
+           and then the RXDTX handler CNG state decides the decoding mode CNG/SPEECH.
+           While In the AMRWB ETSI/3GPP format eid a CRC error in a detected SID_UPDATE frame triggers SID_UPD_BAD.
+
+           Here we inhibit use of the SID-length info, even though it is available in the G.192 file format after STL/EID-XOR .
+         */
+        if ( sid_upd_bad )
+        {
+            sid_upd_bad     = 0;
+            total_brate     = FRAME_NO_DATA ;         /* treat SID_BAD  as a  stolen signaling frame --> SPEECH LOST */
+
+        }
+
+        g192_sid_first = 0;
+        if( st->core_fx == AMR_WB_CORE && st->prev_ft_speech_fx && total_brate == FRAME_NO_DATA && st->bfi_fx == 0 )
+        {
+            g192_sid_first = 1;   /*  SID_FIRST detected for previous AMRWB/AMRWBIO  active frames only  */
+            /*
+            It is not possible to perfectly simulate rate switching conditions EVS->AMRWBIO  where:
+            the very first SID_FIRST detection is based on a past EVS active frame
+            and  a  good length 0  "SID_FIRST"(NO_DATA)   frame is sent in AMRWBIO,
+            , due to the one frame state memory in the AMRWB legacy  G.192 SID_FIRST encoding
+            */
+        }
+
+        speech_bad = 0;
+        if( total_brate > SID_2k40 && st->bfi_fx != 0 ) /*   CS-type of CRC failure   frame */
+        {
+            speech_bad = 1;        /* initial assumption, CNG_state decides what to do */
+        }
+
+        speech_lost = 0;
+        if( total_brate == 0 && st->bfi_fx != 0 ) /*  unsent  NO_DATA or stolen NO_DATA/signaling  frame  */
+        {
+            speech_lost = 1;       /* initial assumption, CNG_state decides what to do */
+        }
+
+        /* Do not allow decoder to enter CNG-synthesis for  any instantly  received  GOOD+LENGTH==0  frame
+           as this frame was never transmitted, one  can not know it is good and has a a length of zero ) */
+
+        if( st->CNG_fx != 0 )
+        {
+            /* We were in CNG synthesis  */
+            if( curr_ft_good_sp != 0  )
+            {
+                /* only a good speech frame makes you leave CNG synthesis */
+                st->CNG_fx = 0;
+            }
+        }
+        else
+        {
+            /* We were in SPEECH synthesis  */
+            /* only a received SID frame can make the decoder enter into CNG synthsis  */
+            if( g192_sid_first || sid_update || sid_upd_bad )
+            {
+                st->CNG_fx = 1;
+            }
+        }
+
+        /*  handle the  g.192  _simulated_ untransmitted frame,  setting  for decoder  SPEECH synthesis  */
+        if ( (st->CNG_fx==0)  &&  (total_brate==0  && st->bfi_fx == 0 ) )
+        {
+            st->bfi_fx = 1;
+            move16(); /*  SPEECH PLC code will now become active as in a real system */
+            /* total_brate= 0  */
+        }
+
+        /* handle bad speech frame(and bad sid frame) in the decoders CNG synthesis settings pair (total_brate, bfi) */
+        if( ((st->CNG_fx != 0) && ( (speech_bad != 0) || (speech_lost != 0) ))  || /* SP_BAD or SPEECH_LOST)   --> stay in CNG */
+                ( sid_upd_bad != 0 ))                                                  /* SID_UPD_BAD              --> start CNG */
+        {
+            st->bfi_fx = 0;
+            total_brate = 0;
+        }
+        /* update for next frame's G.192 file format's  SID_FIRST detection (primarily for AMRWBIO)  */
+        st->prev_ft_speech_fx = ((curr_ft_good_sp != 0) || (curr_ft_bad_sp != 0));
+
+        /*   st->total brate= total_brate ;   updated in a good frame below */
+    } /* rew_flag */
+
+    /* get total bit-rate */
+    if ( st->bfi_fx == 0 && !rew_flag )
+    {
+        /* select MODE1 or MODE2 */
+        decoder_selectCodec( st, total_brate, *pt_stream );
+    }
+
+    Mpy_32_16_ss(total_brate, 5243, &L_tmp, &utmp); /* 5243 is 1/50 in Q18. (0+18-15=3) */
+    st->total_num_bits = extract_l(L_shr(L_tmp, 3)); /* Q0 */
+
+    /* in case rew_flag is set, rewind the file and return */
+    /* (used in io_enc() to print out info about technologies and to initialize the codec) */
+    if ( rew_flag )
+    {
+        st->total_brate_fx = total_brate;
+        move16();
+        return 1;
+    }
+
+    /* GOOD frame */
+    if ( st->bfi_fx == 0  )
+    {
+        /* GOOD frame - convert ITU-T G.192 words to short values */
+        bit_stream_ptr = st->bit_stream_fx;
+
+        for( k = 0; k< num_bits; ++k)
+        {
+            *bit_stream_ptr++ = (*pt_stream++ == G192_BIN1 );
+        }
+
+        /*add two zero bytes for arithmetic coder flush*/
+        for(k=0; k< 2*8; ++k)
+        {
+            *bit_stream_ptr++ = 0;
+        }
+        /*a change of the total bitrate should not be
+        known to the decoder, if the received frame was lost*/
+        st->total_brate_fx = total_brate ;
+
+        mdct_switching_dec(st);
+    }
+
+    return 1;
+}
+
 
 /*-------------------------------------------------------------------*
  * read_indices_fx()
@@ -1546,6 +1812,401 @@ Word16 read_indices_fx(                /* o  : 1 = reading OK, 0 = problem      
     return 1;
 }
 
+/*------------------------------------------------------------------------------------------*
+* read_indices_mime_real()
+*
+* Read indices from MIME formatted bitstream to the buffer
+*   The magic word and number of channnels should be consumed before calling this function
+*-------------------------------------------------------------------------------------------*/
+
+Word16 read_indices_mime_real(                /* o  : 1 = reading OK, 0 = problem            */
+    Decoder_State_fx *st,                /* i/o: decoder state structure                */
+    UWord8 *data,                        /* i  : evs data                         */
+    Word16 dataLen,                        /* i :data len                           */
+    Word16 rew_flag                      /* i  : rewind flag (rewind file after reading) */
+)
+{
+    Word16 k, isAMRWB_IOmode, cmi, core_mode = -1, qbit,sti;
+    UWord8 header;
+	Word16 num_bits;
+	UWord8 pFrame[(MAX_BITS_PER_FRAME + 7) >> 3];
+	UWord8 mask = 0x80, *pt_pFrame = pFrame;
+    UWord16 *bit_stream_ptr;
+
+    Word32 total_brate;
+    UWord16 utmp;
+    Word32 L_tmp;
+    Word16 curr_ft_good_sp;
+    Word16 amrwb_sid_first, sid_upd_bad, sid_update;
+    Word16 speech_bad, speech_lost;
+    Word16 no_data;
+
+    st->BER_detect = 0;
+    st->bfi_fx = 0;
+    st->mdct_sw_enable = 0;
+    st->mdct_sw = 0;
+    reset_indices_dec_fx( st );
+
+    /* read the FT Header field from the bitstream */
+   /* if ( fread( &header, sizeof(UWord8), 1, file ) != 1 )
+    {
+        if( ferror( file ) )
+        {
+            
+            fprintf(stderr, "\nError reading the bitstream !");
+            exit(-1);
+        }
+        else
+        {
+            
+            return 0;
+        }
+    }*/
+
+
+	header = data[0];
+	int headerSize = sizeof(UWord8);
+	
+  //  memcpy(&header,data,sizeof(UWord8));
+
+
+	/*for (i = 0; i < dataLen - 1; i++) {
+		pt_pFrame[i] = pt_pFrame[i + 1]; // 将偏移后的值赋值给自身
+	}*/
+
+
+    /* init local RXDTX flags */
+    curr_ft_good_sp = 0;
+    speech_lost = 0;
+    speech_bad = 0;
+
+    sid_update = 0;
+    sid_upd_bad = 0;
+    sti = -1;
+    amrwb_sid_first = 0;  /* derived from sti  SID_FIRST indicator in AMRWB payload */
+    no_data = 0;
+
+    if( st->amrwb_rfc4867_flag != 0 )
+    {
+        /*   RFC 4867
+        5.3 ....
+        Each stored speech frame starts with a one-octet frame header with
+        the following format:
+        0 1 2 3 4 5 6 7
+        +-+-+-+-+-+-+-+-+
+        |P| FT    |Q|P|P|
+        +-+-+-+-+-+-+-+-+
+        The FT field and the Q bit are defined in the same way as in
+        Section 4.3.2. The P bits are padding and MUST be set to 0, and MUST be ignored. */
+
+        isAMRWB_IOmode   = 1;
+        qbit             = (header>>2)&0x01 ;         /* b2 bit       (b7 is the F bit ) */
+        st->bfi_fx = !qbit;
+        core_mode  = ((header>>3) & 0x0F);     /*  b6..b3      */
+        total_brate = AMRWB_IOmode2rate[core_mode];   /* get the frame length from the header */
+    }
+    else
+    {
+        /*0 1 2 3 4 5 6 7   MS-bit ---> LS-bit
+         +-+-+-+-+-+-+-+-+
+         |H|F|E|x| brate |
+         +-+-+-+-+-+-+-+-+
+          where :
+            "E|x|  brate "  is the 6 bit "FT" -field
+             x is unused    if E=0, (should be 0 )
+             x is the q-bit if E=1, q==1(good), Q==0(bad, maybe bit errors in payload )
+             H,F  always   0 in RTP format.
+        */
+        isAMRWB_IOmode = (header & 0x20) > 0;   /* get EVS mode-from header */ /*    b2   */
+        core_mode      = (header & 0x0F);        /* b4,b5,b6,b7 */
+
+        if( isAMRWB_IOmode )
+        {
+            qbit = (header & 0x10) > 0;      /* get Q bit,    valid for IO rates */ /* b3 */
+            total_brate = AMRWB_IOmode2rate[core_mode];
+        }
+        else
+        {
+            qbit = 1;  /* assume good q_bit for the unused EVS-mode bit,    complete ToC validity checked later */
+            total_brate = PRIMARYmode2rate[ core_mode ];
+        }
+        st->bfi_fx = !qbit;
+    }
+
+
+
+
+    /* set up RX-DTX-handler input */
+    if(   core_mode == 14  )
+    {
+        /* SP_LOST */
+        speech_lost=1;
+    }
+    if ( core_mode  == 15)
+    {
+        /*  NO_DATA unsent CNG frame OR  any frame marked or injected  as no_data  by e.g a signaling layer or dejitter buffer */
+        no_data=1;
+    }
+
+    Mpy_32_16_ss(total_brate, 5243, &L_tmp, &utmp); /* 5243 is 1/50 in Q18. (0+18-15=3) */
+    num_bits = extract_l(L_shr(L_tmp, 3)); /* Q0 */
+    st->total_num_bits = num_bits;
+
+    if( total_brate < 0 )
+    {
+        /* validate that total_brate (derived from RTP packet or a file header) is one of the defined bit rates  */
+        fprintf(stderr, "\n  Error.  Illegal total bit rate (= %d) in MIME ToC header \n",     total_brate );
+        /* num_bits = -1;   not needed as BASOP multiplication preserves sign */
+    }
+
+    /* Check correctness of ToC headers  */
+    if( st->amrwb_rfc4867_flag == 0 )
+    {
+        /* EVS ToC header (FT field(b2-b7), H bit (b0),    F bit (b1)  ,  (EVS-modebit(b2)=0  unused(Qbit)(b3)==0)   */
+        if ( (isAMRWB_IOmode == 0) &&  ((num_bits < 0)  ||  ((header & 0x80) > 0) || ((header & 0x40) > 0)  || (header & 0x30) != 0x00 )  )
+        {
+            /* incorrect FT header */
+            fprintf(stderr, "\nError in EVS  FT ToC header(%02x) ! ",header);
+            exit(-1);
+        }
+        else if( (isAMRWB_IOmode != 0) && ( (num_bits < 0) ||  ((header & 0x80) > 0) || ((header & 0x40) > 0) )  )  /* AMRWBIO */
+        {
+            /* incorrect IO FT header */
+            fprintf(stderr, "\nError in EVS(AMRWBIO)  FT ToC header(%02x) ! ",header);
+            exit(-1);
+        }
+    }
+    else
+    {
+        /* legacy AMRWB ToC,   is only using  Padding bits which MUST be ignored */
+        if ( num_bits < 0  )
+        {
+            /* incorrect FT header */
+            fprintf(stderr, "\nError in AMRWB RFC4867  Toc(FT)  header(%02x) !", header);
+            exit(-1);
+        }
+    }
+
+    /* read serial stream of indices from file to the local buffer */
+
+	Word16 num_bytes = (num_bits + 7) >> 3;
+	memcpy(pFrame, data+headerSize, num_bytes);
+
+  //  num_bits_read = (Word16) fread( pFrame, sizeof(UWord8), (num_bits + 7)>>3, file );
+    //if(num_bytes != (num_bits + 7)>>3 )
+    //{
+     //   fprintf(stderr, "\nError, invalid number of bytes read ! Exiting ! \n");
+     //   exit(-1);
+   // }
+
+    /* in case rew_flag is set, rewind the file and return */
+    /* (used in io_dec() to attempt print out info about technologies and to initialize the codec ) */
+    if ( rew_flag )
+    {
+        st->total_brate_fx = total_brate;  /* used for the codec banner output */
+        if( st->bfi_fx == 0 && speech_lost == 0 && no_data == 0 )
+        {
+            decoder_selectCodec( st, total_brate, unpack_bit(&pt_pFrame,&mask) ? G192_BIN1 : G192_BIN0);
+        }
+        return 1;
+    }
+
+
+
+    /* unpack speech data */
+    bit_stream_ptr = st->bit_stream_fx;
+    for (k=0; k<num_bits; k++)
+    {
+        if (isAMRWB_IOmode)
+        {
+            st->bit_stream_fx[sort_ptr[core_mode][k]] = unpack_bit(&pt_pFrame,&mask);
+            bit_stream_ptr++;
+        }
+        else
+        {
+            *bit_stream_ptr++ = unpack_bit(&pt_pFrame,&mask);
+        }
+    }
+
+    /* unpack auxiliary bits */
+    /* Note: the cmi bits are unpacked for  demo  purposes;  */
+    if (isAMRWB_IOmode && total_brate == SID_1k75)
+    {
+        sti = unpack_bit(&pt_pFrame,&mask);
+        cmi  = unpack_bit(&pt_pFrame,&mask) << 3;
+        cmi |= unpack_bit(&pt_pFrame,&mask) << 2;
+        cmi |= unpack_bit(&pt_pFrame,&mask) << 1;
+        cmi |= unpack_bit(&pt_pFrame,&mask);
+
+        if( sti == 0 )
+        {
+            total_brate = 0;     /* signal received SID_FIRST as a good frame with no bits */
+            for(k=0; k<35; k++)
+            {
+                st->bfi_fx  |= st->bit_stream_fx[k] ; /* partity check of 35 zeroes,  any single 1 gives BFI */
+            }
+        }
+    }
+
+    /*add two zero bytes for arithmetic coder flush*/
+    for(k=0; k< 2*8; ++k)
+    {
+        *bit_stream_ptr++ = 0;
+    }
+
+    /* MIME RX_DTX handler */
+    if( !rew_flag )
+    {
+        /* keep st->CNG_fx , st_bfi_fx and total_brate  updated  for proper synthesis in DTX and FER  */
+        if( total_brate > SID_2k40 )
+        {
+            if( st->bfi_fx == 0 )   /* so  far derived from q bit in AMRWB/AMRWBIO cases   */
+            {
+                curr_ft_good_sp = 1;
+            }
+        }
+
+        /* handle q_bit and  lost_sp  clash ,  assume worst case  */
+        if( speech_lost != 0 )  /*  overrides  a good q_bit */
+        {
+            curr_ft_good_sp = 0;
+            st->bfi_fx      = 1;     /* override  qbit */
+        }
+
+        /* now_bfi_fx has been set based on q_bit and ToC fields */
+
+
+        /* SID_UPDATE check */
+        if( total_brate == SID_1k75 || total_brate == SID_2k40 )
+        {
+            if( st->bfi_fx == 0 )
+            {
+                /* typically from q bit  */
+                sid_update = 1;
+            }
+            else
+            {
+                sid_upd_bad = 1;  /* may happen in saving from e.g. a CS-connection */
+            }
+        }
+
+        if( isAMRWB_IOmode && total_brate == 0 && sti == 0 )
+        {
+            if( st->bfi_fx )
+            {
+                sid_upd_bad = 1;          /*  corrupt sid_first, signaled as bad sid  */
+            }
+            else
+            {
+                amrwb_sid_first =  1;     /* 1-sti  */
+            }
+        }
+
+        if ( sid_upd_bad != 0 && (
+                    (isAMRWB_IOmode != 0 && st->Opt_AMR_WB_fx==0 )  || /* switch to    AMRWBIO */
+                    (isAMRWB_IOmode != 1 && st->Opt_AMR_WB_fx==1)      /* switch from  AMRWBIO */
+                ) )
+        {
+            /* do not allow a normal start of  CNG synthesis if this SID(with BER or FER) is a switch to/from AMRWBIO  */
+            sid_upd_bad = 0; /* revert this detection due to AMRWBIO/EVS mode switch */
+            total_brate = 0;
+            no_data     = 1;
+            assert( st->bfi_fx==1); /* bfi_fx stays 1 */
+        }
+
+
+        if( total_brate > SID_2k40 && st->bfi_fx )  /* typically from q bit  */
+        {
+            speech_bad = 1;    /* initial assumption,   CNG synt state decides what to actually do */
+        }
+        /* all frame types decoded */
+
+        /*    update CNG synthesis state */
+        /*    Decoder can only  enter CNG-synthesis  for  CNG frame types (sid_upd,  sid_bad, sid_first) */
+        if( st->CNG_fx != 0 )
+        {
+            /* We were in CNG synthesis  */
+            if( curr_ft_good_sp != 0  )
+            {
+                /* only a good speech frame makes decoder leave CNG synthesis */
+                st->CNG_fx = 0;
+            }
+        }
+        else
+        {
+            /*   We were in SPEECH synthesis  */
+            /*   only a received SID frame can make the decoder enter into CNG synthesis  */
+            if( amrwb_sid_first || sid_update || sid_upd_bad )
+            {
+                st->CNG_fx = 1;
+            }
+        }
+
+        /* Now modify bfi flag for the  decoder's  SPEECH/CNG synthesis logic  */
+        /*   in SPEECH synthesis, make sure to activate speech plc for a received no_data frame,
+             no_data frames may be injected by the network or by the dejitter buffer   */
+        /*   modify bfi_flag to stay/move into the correct decoder PLC section  */
+        if ( (st->CNG_fx == 0)  &&  ( no_data != 0 )  )
+        {
+            /*  treat no_data received in speech synthesis as  SP_LOST frames, SPEECH PLC code will now become active */
+            st->bfi_fx = 1;
+            /* total_brate= 0  . always zero for no_data */
+        }
+
+        /* in CNG  */
+        /* handle bad speech frame(and bad sid frame) in the decoders CNG synthesis settings pair (total_brate, bfi)  */
+        if( ( st->CNG_fx != 0 && ( speech_bad || speech_lost || no_data ))  || /* SP_BAD or SPEECH_LOST)   --> stay in CNG */
+                sid_upd_bad )                                                      /* SID_UPD_BAD              --> start/stay  CNG   */
+        {
+
+            st->bfi_fx = 0;    /* mark as good to not start speech PLC */
+            total_brate= 0;    /* zeroing is needed  for  speech_bad,  sid_bad frames CNG- synthesis  in the decoder subfunctions   */
+
+
+        }
+    }
+
+    /*  now  bfi, total_brate are set by RX-DTX handler::
+         bfi==0, total_brate!=0    cng or speech pending  bitrate
+         bfi==0, total_brate==0    cng will continue or start(sid_first, evs_sid_bad, amrwb_sid_bad)
+         bfi==1, total_brate!=0    speech plc
+         bfi==1, total_brate==0 ,  speech plc
+    */
+
+    /*  handle available AMRWB/AMRWBIO ToC rate info at startup   */
+    if(  ( st->bfi_fx != 0 && rew_flag == 0 && st->ini_frame_fx == 0) && /*  ini_frame can not be used when rewflag is 1  */
+            ( (st->amrwb_rfc4867_flag != 0)  || (st->amrwb_rfc4867_flag == 0 && isAMRWB_IOmode != 0  )) )  /*AMRWB ToC */
+    {
+        Word32 init_rate;
+
+        init_rate = total_brate;          /* default , may have been be modified */
+        if (speech_lost != 0 || no_data != 0 )
+        {
+            init_rate =  ACELP_12k65;
+        }
+        else if( speech_bad != 0  )
+        {
+            init_rate   =   AMRWB_IOmode2rate[core_mode];   /* read info from ToC */
+        }
+        st->total_brate_fx  = init_rate;  /* not updated on bfi as  decoderSelectCodec is not called below */
+        st->core_brate_fx   = init_rate;
+    }
+
+    if( st->bfi_fx == 0 )
+    {
+        /* select MODE1 or MODE2 in  MIME */
+        decoder_selectCodec( st, total_brate, *st->bit_stream_fx ? G192_BIN1 : G192_BIN0);
+
+        /* a change of the total bitrate should not be known to the decoder, if the received frame was truly lost */
+        st->total_brate_fx = total_brate;
+        mdct_switching_dec(st);
+    }
+    /* else{ bfi stay in past synthesis mode(SP,CNG) } */
+
+    return 1;
+}
+
+
 
 /*------------------------------------------------------------------------------------------*
 * read_indices_mime()
@@ -1573,7 +2234,7 @@ Word16 read_indices_mime(                /* o  : 1 = reading OK, 0 = problem    
     Word16 amrwb_sid_first, sid_upd_bad, sid_update;
     Word16 speech_bad, speech_lost;
     Word16 no_data;
-    Word16 num_bytes_read;
+    Word16 num_bits_read;
 
     st->BER_detect = 0;
     st->bfi_fx = 0;
@@ -1710,8 +2371,8 @@ Word16 read_indices_mime(                /* o  : 1 = reading OK, 0 = problem    
     }
 
     /* read serial stream of indices from file to the local buffer */
-    num_bytes_read = (Word16) fread( pFrame, sizeof(UWord8), (num_bits + 7)>>3, file );
-    if( num_bytes_read != (num_bits + 7)>>3 )
+	num_bits_read = (Word16) fread( pFrame, sizeof(UWord8), (num_bits + 7)>>3, file );
+    if(num_bits_read != (num_bits + 7)>>3 )
     {
         fprintf(stderr, "\nError, invalid number of bytes read ! Exiting ! \n");
         exit(-1);

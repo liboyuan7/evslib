@@ -2,7 +2,7 @@
     EVS Codec 3GPP TS26.442 Nov 13, 2018. Version 12.12.0 / 13.7.0 / 14.3.0 / 15.1.0
   ====================================================================================*/
 
-
+#if 0
 #include <stdlib.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -17,6 +17,9 @@
 #include "g192.h"
 #include "stat_enc_fx.h"
 #include "prot_fx.h"
+#else
+#include "evs_encoder.h"
+#endif
 
 /*------------------------------------------------------------------------------------------*
  * Global variables
@@ -32,6 +35,7 @@ long frame = 0;                 /* Counter of frames */
 
 int main( int argc, char** argv )
 {
+#if 0
     FILE             *f_stream = NULL;                    /* output bitstream file */
     Indice_fx ind_list[MAX_NUM_INDICES];                  /* list of indices */
     Encoder_State_fx *st_fx;                              /*Encoder state struct*/
@@ -71,10 +75,11 @@ int main( int argc, char** argv )
         fprintf(stderr, "Can not allocate memory for encoder state structure\n");
         exit(-1);
     }
-
+	
     io_ini_enc_fx( argc, argv, &f_input, &f_stream, &f_rate, &f_bwidth,
                    &f_rf,
                    &quietMode, &noDelayCmp, st_fx);
+
 
     /*input_frame = (short)(st->input_Fs / 50);*/
     st_fx->input_frame_fx = extract_l(Mult_32_16(st_fx->input_Fs_fx , 0x0290));
@@ -118,7 +123,7 @@ int main( int argc, char** argv )
     setFrameRate(48000, 960);
 #endif
 
-
+	printf( "test  Running the encoder \n");
     if (quietMode == 0)
     {
         fprintf( stdout, "\n------ Running the encoder ------\n\n" );
@@ -138,31 +143,36 @@ int main( int argc, char** argv )
 #endif
         SUB_WMOPS_INIT("enc");
 
+
         IF(f_rf != NULL)
         {
+			printf("f_rf != NULL frame:%d \n", frame);
             read_next_rfparam_fx(
                 &st_fx->rf_fec_offset, &st_fx->rf_fec_indicator, f_rf);
             rf_fec_offset_loc = st_fx->rf_fec_offset;
         }
-
+	
         IF(f_rate != NULL)
         {
+			printf("f_rate != NULL frame:%d \n", frame);
             /* read next bitrate from profile file (only if invoked on the cmd line) */
             read_next_brate_fx( &st_fx->total_brate_fx, st_fx->last_total_brate_fx,
                                 f_rate, st_fx->input_Fs_fx, &st_fx->Opt_AMR_WB_fx, &st_fx->Opt_SC_VBR_fx, &st_fx->codec_mode );
         }
-
+	
         IF (f_bwidth != NULL)
         {
+			printf("f_bwidth != NULL frame:%d \n", frame);
             /* read next bandwidth from profile file (only if invoked on the cmd line) */
             read_next_bwidth_fx( &st_fx->max_bwidth_fx, f_bwidth, &bwidth_profile_cnt, st_fx->input_Fs_fx );
         }
-
+	
         IF( ( st_fx->Opt_RF_ON && ( L_sub( st_fx->total_brate_fx, ACELP_13k20 ) != 0 ||  L_sub( st_fx->input_Fs_fx, 8000 ) == 0 || st_fx->max_bwidth_fx == NB ) )
             || st_fx->rf_fec_offset == 0 )
         {
             IF( L_sub( st_fx->total_brate_fx, ACELP_13k20) == 0 )
             {
+				printf("MODE1 frame:%d \n", frame);
                 st_fx->codec_mode = MODE1;
                 reset_rf_indices(st_fx);
             }
@@ -170,9 +180,10 @@ int main( int argc, char** argv )
             st_fx->rf_fec_offset = 0;
 
         }
-
+	
         IF( Opt_RF_ON_loc && rf_fec_offset_loc != 0 && L_sub( st_fx->total_brate_fx, ACELP_13k20 ) == 0 && L_sub( st_fx->input_Fs_fx, 8000 ) != 0 && st_fx->max_bwidth_fx != NB )
         {
+			printf("MODE2 frame:%d \n", frame);
             st_fx->codec_mode = MODE2;
             IF(st_fx->Opt_RF_ON == 0)
             {
@@ -181,26 +192,27 @@ int main( int argc, char** argv )
             st_fx->Opt_RF_ON = 1;
             st_fx->rf_fec_offset = rf_fec_offset_loc;
         }
-
+	
         /* in case of 8kHz sampling rate or when in "max_band NB" mode, limit the total bitrate to 24.40 kbps */
         IF ( (L_sub( st_fx->input_Fs_fx, 8000 ) == 0 || (st_fx->max_bwidth_fx == NB)) && L_sub( st_fx->total_brate_fx, ACELP_24k40 ) > 0 )
         {
+			printf("ACELP_24k40 MODE2 frame:%d \n", frame);
             st_fx->total_brate_fx = ACELP_24k40;
             st_fx->codec_mode = MODE2;
         }
 
 
         /* run the main encoding routine */
-
-
         IF ( st_fx->Opt_AMR_WB_fx )
         {
+			printf("amr_wb_enc frame:%d \n", frame);
             SUB_WMOPS_INIT("amr_wb_enc");
             amr_wb_enc_fx( st_fx, data, n_samples);
             END_SUB_WMOPS;
         }
         ELSE
         {
+			printf("evs_enc frame:%d \n", frame);
             SUB_WMOPS_INIT("evs_enc");
             /* EVS encoder*/
             evs_enc_fx( st_fx, data, n_samples);
@@ -209,9 +221,11 @@ int main( int argc, char** argv )
         /* pack indices into serialized payload format */
         if( st_fx->bitstreamformat == MIME )
         {
+			printf("MIME frame:%d \n", frame);
             indices_to_serial(st_fx, pFrame, &pFrame_size);
         }
 
+		printf("pFrame_size:%d\n", pFrame_size);
         /* write indices into bitstream file */
         write_indices_fx( st_fx, f_stream, pFrame, pFrame_size );
 
@@ -276,6 +290,33 @@ int main( int argc, char** argv )
     fclose(f_rate);
     IF(f_bwidth)
     fclose(f_bwidth);
+#else
+
+    EvsEncoderContext * enc = NewEvsEncoder();
+    InitEncoder(enc,8000,9600,"NB",0);
+	
+   FILE * f_input = fopen("./test8K.pcm","rb");
+   if(f_input ==NULL)
+   {
+        return -1;
+   }
+  
+    int n_samples = 0;
+    int input_frame = enc->st_fx->input_frame_fx;
+    char data[L_FRAME48k];                              /* Input buffer */
+	EncoderDataBuf buf;
+    fprintf( stdout, "\n------ Running the encoder ------\n\n" );
+
+
+
+    while( (n_samples = (short)fread(data, sizeof(short), input_frame, f_input)) > 0 )
+    {
+       
+		EvsStartEncoder(enc, data, n_samples,&buf);
+    }
+    StopEncoder(enc);
+
+#endif
 
 
     return 0;

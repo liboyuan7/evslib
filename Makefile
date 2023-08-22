@@ -8,8 +8,8 @@ BUILD     = build
 SRC_DIRS  = $(sort -u $(SRC_ENC) $(SRC_DEC)) 
 
 # Name of CLI binaries
-CLI_ENC   = EVS_cod
-CLI_DEC   = EVS_dec
+CLI_ENC   = libevsEncoder.a
+CLI_DEC   = libevsDecoder.a
 
 # Default tool settings
 CC        = gcc
@@ -48,6 +48,7 @@ CFLAGS   += $(foreach DIR,$(SRC_DIRS),-I$(DIR))
 
 # Source file search paths
 VPATH     = $(SRC_DIRS)
+AR        = ar -rcs
 
 ###############################################################################
 
@@ -69,10 +70,12 @@ $(BUILD):
 	$(QUIET)mkdir -p $(BUILD)
 
 $(CLI_ENC): $(OBJS_ENC)
-	$(QUIET_LINK)$(CC) $(LDFLAGS) $(OBJS_ENC) -lm -o $(CLI_ENC)
+	$(AR) $@ $^
+	#$(QUIET_LINK)$(CC) $(LDFLAGS) $(OBJS_ENC) -lm -o $(CLI_ENC)
 
 $(CLI_DEC): $(OBJS_DEC)
-	$(QUIET_LINK)$(CC) $(LDFLAGS) $(OBJS_DEC) -lm -o $(CLI_DEC)
+	$(AR) $@ $^
+	#$(QUIET_LINK)$(CC) $(LDFLAGS) $(OBJS_DEC) -lm -o $(CLI_DEC)
 
 clean:
 	$(QUIET)$(RM) $(OBJS_ENC) $(OBJS_DEC) $(DEPS)

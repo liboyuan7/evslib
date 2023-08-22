@@ -13,6 +13,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E822DDAF-0F5F-4CD0-A694-38AE69DE74D3}</ProjectGuid>
     <RootNamespace>evs_dec</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -189,6 +190,7 @@
     <ClCompile Include="..\lib_dec\er_sync_exc.c" />
     <ClCompile Include="..\lib_dec\er_util.c" />
     <ClCompile Include="..\lib_dec\EvsRXlib.c" />
+    <ClCompile Include="..\lib_dec\evs_decoder.c" />
     <ClCompile Include="..\lib_dec\evs_dec_fx.c" />
     <ClCompile Include="..\lib_dec\fd_cng_dec.c" />
     <ClCompile Include="..\lib_dec\FEC_adapt_codebook_fx.c" />

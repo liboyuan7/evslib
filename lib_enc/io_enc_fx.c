@@ -449,19 +449,22 @@ void io_ini_enc_fx(
 
     if( i < argc-1 )
     {
-        if ( (*f_input = fopen(argv[i], "rb")) == NULL )
-        {
-            fprintf(stderr, "Error: input audio file %s could not be opened\n\n", argv[i]);
-            usage_enc();
-        }
-
-        fprintf(stdout, "Input audio file:       %s\n", argv[i]);
+		fprintf(stdout, "Input audio file:       %s\n", argv[i]);
+		if (argv[i] != NULL)
+		{
+			if ((*f_input = fopen(argv[i], "rb")) == NULL)
+			{
+				fprintf(stderr, "Error: input audio file %s could not be opened\n\n", argv[i]);
+				usage_enc();
+			}
+		}
+        
         i++;
     }
     else
     {
         fprintf(stderr, "Error: no input file specified\n\n");
-        usage_enc();
+       // usage_enc();
     }
 
     /*-----------------------------------------------------------------*
@@ -470,15 +473,18 @@ void io_ini_enc_fx(
 
     if( i < argc )
     {
-        if ( (*f_stream = fopen(argv[i], "wb")) == NULL)
-        {
-            fprintf(stderr, "Error: output bitstream file %s could not be opened\n\n", argv[i]);
-            usage_enc();
-        }
+		if (argv[i] != NULL)
+		{
+			if ((*f_stream = fopen(argv[i], "wb")) == NULL)
+			{
+				fprintf(stderr, "Error: output bitstream file %s could not be opened\n\n", argv[i]);
+				usage_enc();
+			}
+		}
         fprintf(stdout, "Output bitstream file:  %s\n", argv[i]);
         i++;
         /* If MIME/storage format selected, write the magic number at the beginning of the bitstream file */
-        if( st->bitstreamformat == MIME )
+        if( st->bitstreamformat == MIME && *f_stream != NULL)
         {
             char buf[4];
             fwrite(EVS_MAGIC_NUMBER, sizeof(char), strlen(EVS_MAGIC_NUMBER), *f_stream);
@@ -491,7 +497,7 @@ void io_ini_enc_fx(
     else
     {
         fprintf(stderr, "Error: no output bitstream file specified\n\n");
-        usage_enc();
+        //usage_enc();
     }
 
     fprintf( stdout, "\n" );

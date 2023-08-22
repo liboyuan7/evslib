@@ -1301,6 +1301,12 @@ typedef struct Encoder_State_fx
 
     Word16 Local_VAD;
 
+    Word8 outData[2+MAX_BITS_PER_FRAME];
+    Word8 outDataLen;
+
+	Word16 outDataG192[2 + MAX_BITS_PER_FRAME];
+	Word16 outDataLenG192;
+
 } Encoder_State_fx;
 
 /* Structure for storing correlations between ACELP codebook components and target */

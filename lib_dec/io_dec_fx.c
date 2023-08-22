@@ -82,6 +82,7 @@ void io_ini_dec_fx(
 
     st_fx->bitstreamformat = G192;
     st_fx->amrwb_rfc4867_flag = -1;
+  
 
     IF ( argc <= 1 )
     {
@@ -200,17 +201,23 @@ void io_ini_dec_fx(
 
     if( i < argc - 1 )
     {
-        if ( (*f_stream = fopen(argv[i], "rb")) == NULL)
+        if(argv[i] != NULL)
         {
-            fprintf(stderr,"Error: input bitstream file %s cannot be opened\n\n", argv[i]);
-            usage_dec();
+              if ( (*f_stream = fopen(argv[i], "rb")) == NULL)
+            {
+                fprintf(stderr,"Error: input bitstream file %s cannot be opened\n\n", argv[i]);
+                usage_dec();
+            }
         }
+      
         /* If MIME/storage format selected, scan for the magic number at the beginning of the bitstream file */
-        if( st_fx->bitstreamformat == MIME )
+        if( st_fx->bitstreamformat == MIME)
         {
-            char buf[13];
-            evs_magic   = 1 ;
-            amrwb_magic = 1;
+            if(*f_stream != NULL)
+            {
+                 char buf[13];
+				evs_magic   = 1 ;
+				amrwb_magic = 1;
 
             if(NULL == fgets(buf, 13, *f_stream))
             {
@@ -218,30 +225,37 @@ void io_ini_dec_fx(
                 usage_dec();
             }
 
+			fprintf(stderr, "Error: input bitstream file %s 13bits read\n\n", buf);
+
             /* verify AMRWB magic number */
             if ( strncmp(buf, AMRWB_MAGIC_NUMBER, strlen(AMRWB_MAGIC_NUMBER)))
             {
+				fprintf(stderr, "Error: input bitstream file is not amrwb_magic \n");
                 amrwb_magic = 0;
             }
 
+		
             if ( strncmp(buf, EVS_MAGIC_NUMBER, strlen(EVS_MAGIC_NUMBER))) /* strncmp safer than strcmp */
             {
+				fprintf(stderr, "Error: input bitstream file is not evs_magic \n");
                 evs_magic = 0;
             }
 
             if( evs_magic != 0 )
             {
+                
                 if ((fread(&buf,sizeof(char), 4, *f_stream) != 4 ) || !((buf[3] == 1) && (buf[2] == 0) && (buf[1] == 0) &&  (buf[0] == 0)) )
                 {
                     fprintf(stderr, "Error: input bitstream file %s specifies unsupported number of evs audio channels\n\n",argv[i]);
                     usage_dec();
                 }
+                
             }
 
             if( evs_magic == 0 &&  amrwb_magic == 0 )
             {
                 /* no valid MIME magic number  */
-                fprintf(stderr, "Error: input bitstream file %s specifies unsupported MIME magic number (%13s) \n\n",argv[i],buf );
+                fprintf(stderr, "Error: input bitstream file %s specifies unsupported MIME magic number %13s \n\n",argv[i],buf );
                 usage_dec();
             }
 
@@ -256,32 +270,38 @@ void io_ini_dec_fx(
                 st_fx->amrwb_rfc4867_flag = 1;
                 st_fx->Opt_AMR_WB_fx = 1;    /*  needed in case first initial RFC4867 frames/ToCs are lost */
             }
+            }
+           
         }
         else if( st_fx->Opt_VOIP_fx == 0 )
         {
-            /* G.192 format ....  preread the G.192 sync header */
-            UWord16 utmp;
-            if ( fread( &utmp, sizeof(unsigned short), 1, *f_stream ) != 1 )
+            if(*f_stream != NULL)
             {
-                /* error during pre-reading */
-                if( ferror( *f_stream ) )
+                 /* G.192 format ....  preread the G.192 sync header */
+                UWord16 utmp;
+                if ( fread( &utmp, sizeof(unsigned short), 1, *f_stream ) != 1 )
                 {
-                    fprintf(stderr, "Error: input G.192 bitstream file %s , can not be read  \n\n",argv[i] );
+                    /* error during pre-reading */
+                    if( ferror( *f_stream ) )
+                    {
+                        fprintf(stderr, "Error: input G.192 bitstream file %s , can not be read  \n\n",argv[i] );
+                    }
+                    else
+                    {
+                        fprintf(stderr, "Error: input G.192 bitstream file %s , has zero size, can not be read  \n\n",argv[i] );
+                    }
+                    usage_dec();
                 }
-                else
+                if( (sub(utmp, SYNC_GOOD_FRAME) != 0) && (sub(utmp, SYNC_BAD_FRAME) != 0) )
                 {
-                    fprintf(stderr, "Error: input G.192 bitstream file %s , has zero size, can not be read  \n\n",argv[i] );
+                    /* check for a valid first G.192 synch  word in Sync Header  */
+                    fprintf(stderr, "Error: input bitstream file %s does not have a valid G.192 synch word value \n\n",argv[i]);
+                    usage_dec();
                 }
-                usage_dec();
+                /* now rewind the G.192 bitstream file */
+                fseek( *f_stream , 0L, SEEK_SET );
             }
-            if( (sub(utmp, SYNC_GOOD_FRAME) != 0) && (sub(utmp, SYNC_BAD_FRAME) != 0) )
-            {
-                /* check for a valid first G.192 synch  word in Sync Header  */
-                fprintf(stderr, "Error: input bitstream file %s does not have a valid G.192 synch word value \n\n",argv[i]);
-                usage_dec();
-            }
-            /* now rewind the G.192 bitstream file */
-            fseek( *f_stream , 0L, SEEK_SET );
+           
         }
         /*  JBM format */
 
@@ -301,11 +321,15 @@ void io_ini_dec_fx(
 
     if( i < argc )
     {
-        if ( (*f_synth = fopen(argv[i], "wb")) == NULL )
+        if(argv[i] != NULL)
         {
-            fprintf( stderr, "Error: ouput synthesis file %s cannot be opened\n\n", argv[i] );
-            usage_dec();
+             if ( (*f_synth = fopen(argv[i], "wb")) == NULL )
+            {
+                fprintf( stderr, "Error: ouput synthesis file %s cannot be opened\n\n", argv[i] );
+                usage_dec();
+            }
         }
+       
 
         fprintf( stdout, "Output synthesis file:  %s\n", argv[i] );
         i++;
@@ -319,25 +343,29 @@ void io_ini_dec_fx(
 
     if( !st_fx->Opt_VOIP_fx )
     {
-        /*-----------------------------------------------------------------*
-         * Read information from bitstream
-         *-----------------------------------------------------------------*/
-        if( st_fx->bitstreamformat == G192 )
+        if(*f_stream != NULL)
         {
-            read_indices_fx( st_fx, *f_stream, 1 );     /* rew_flag == 1 , reads future frames */
-        }
-        else
-        {
-            read_indices_mime( st_fx, *f_stream, 1 );   /* rew_flag == 1 ,  checks only very first  frame  */
-            if( st_fx->amrwb_rfc4867_flag != 0 )
+            /*-----------------------------------------------------------------*
+             * Read information from bitstream
+             *-----------------------------------------------------------------*/
+            if( st_fx->bitstreamformat == G192 )
             {
-                fseek(*f_stream,strlen(AMRWB_MAGIC_NUMBER),SEEK_SET);    /* restart after 9 bytes */
+                read_indices_fx( st_fx, *f_stream, 1 );     /* rew_flag == 1 , reads future frames */
             }
             else
             {
-                fseek(*f_stream,strlen(EVS_MAGIC_NUMBER)+4, SEEK_SET); /* restart after  16 bytes */
+                read_indices_mime( st_fx, *f_stream, 1 );   /* rew_flag == 1 ,  checks only very first  frame  */
+                if( st_fx->amrwb_rfc4867_flag != 0 )
+                {
+                    fseek(*f_stream,strlen(AMRWB_MAGIC_NUMBER),SEEK_SET);    /* restart after 9 bytes */
+                }
+                else
+                {
+                    fseek(*f_stream,strlen(EVS_MAGIC_NUMBER)+4, SEEK_SET); /* restart after  16 bytes */
+                }
             }
         }
+        
 
         /*-----------------------------------------------------------------*
          * Print info on screen

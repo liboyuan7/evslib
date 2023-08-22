@@ -157,6 +157,7 @@ void reset_indices_dec_fx(
     Decoder_State_fx *st_fx                   /* i/o: decoder state structure */
 );
 
+
 void write_indices_fx(
     Encoder_State_fx *st_fx,                  /* i/o: encoder state structure */
     FILE *file                       /* i  : output bitstream file                     */
@@ -164,10 +165,24 @@ void write_indices_fx(
     Word16 pFrame_size  /* i: size of the binary encoded access unit [bits] */
 );
 
+Word16 read_indices_fx_real(                     /* o  : 1 = OK, 0 = something wrong            */
+    Decoder_State_fx *st_fx,                    /* i/o: decoder state structure */
+    UWord16 *data,                        /* i  : evs data                         */
+    Word16 dataLen,                        /* i :data len                           */
+    Word16 rew_flag                    /* i  : rewind flag  */
+);
+
 Word16 read_indices_fx(                     /* o  : 1 = OK, 0 = something wrong            */
     Decoder_State_fx *st_fx,                    /* i/o: decoder state structure */
     FILE *file,                      /* i  : bitstream file                         */
     Word16 rew_flag                    /* i  : rewind flag (rewind file after reading) */
+);
+
+Word16 read_indices_mime_real(                /* o  : 1 = reading OK, 0 = problem            */
+    Decoder_State_fx *st,                /* i/o: decoder state structure                */
+    UWord8 *data,                        /* i  : evs data                         */
+    Word16 dataLen,                        /* i :data len                           */
+    Word16 rew_flag                      /* i  : rewind flag (rewind file after reading)*/
 );
 
 Word16 read_indices_mime(                /* o  : 1 = reading OK, 0 = problem            */

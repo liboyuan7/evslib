@@ -1,7 +1,7 @@
 /*====================================================================================
     EVS Codec 3GPP TS26.442 Nov 13, 2018. Version 12.12.0 / 13.7.0 / 14.3.0 / 15.1.0
   ====================================================================================*/
-
+#if 0
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +15,9 @@
 #include "disclaimer.h"
 
 #include "EvsRXlib.h"
+#else
+#include "evs_decoder.h"
+#endif
 
 /*------------------------------------------------------------------------------------------*
  * Global variables
@@ -24,6 +27,7 @@ long frame = 0;                 /* Counter of frames */
 
 int main(int argc, char *argv[])
 {
+#if 0
     Decoder_State_fx  *st_fx;                             /* decoder state structure     */
     Word16            zero_pad, dec_delay,output_frame;
     FILE              *f_stream;                          /* input bitstream file        */
@@ -61,6 +65,7 @@ int main(int argc, char *argv[])
 
     st_fx->bit_stream_fx = bit_stream;
 
+	
     io_ini_dec_fx( argc, argv, &f_stream, &f_synth,
                    &quietMode,
                    &noDelayCmp,
@@ -105,6 +110,7 @@ int main(int argc, char *argv[])
 
         if( noDelayCmp == 0)
         {
+			fprintf(stdout, "\n--noDelayCmp == 0 --\n\n");
             /* calculate the compensation (decoded signal aligned with original signal) */
             /* the number of first output samples will be reduced by this amount */
             dec_delay = NS2SA_fx2(st_fx->output_Fs_fx, get_delay_fx(DEC, st_fx->output_Fs_fx));
@@ -252,7 +258,33 @@ int main(int argc, char *argv[])
     free( st_fx );
     fclose( f_synth );
     fclose( f_stream );
+#else
+    EvsDecoderContext *dec = NewEvsDecoder();
 
+   FILE * f_input = fopen("./encoder.evs","rb");
+   if(!f_input)
+   {
+        return -1;
+   }
+
+    printf("InitDecoder...\n");
+    InitDecoder(dec,8000,9600,0);
+    int n_samples = 0;
+	int input_frame = dec->st_fx->output_frame_fx;
+    char data[L_FRAME48k];                              /* Input buffer */
+    DecoderDataBuf buf;
+    fprintf( stdout, "\n------ Running the decoder:%d ------\n\n",input_frame);
+	//while(dec->st_fx->bitstreamformat == G192 ? read_indices_fx(dec->st_fx, dec->f_stream, 0) : read_indices_mime(dec->st_fx, dec->f_stream, 0))
+    while( (n_samples = (short)fread(data, sizeof(UWord8), 1, f_input)) > 0 )
+    {
+	//fprintf(stdout, "\n------ Running the n_samples:%d ------\n\n", n_samples);
+       
+        EvsStartDecoder(dec, data, n_samples,&buf);
+    }
+
+   
+    StopDecoder(dec);
+#endif
 
     return 0;
 }
