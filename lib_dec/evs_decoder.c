@@ -80,7 +80,7 @@ int InitDecoder(EvsDecoderContext* dec,int sample,int bitRate,int isG192Format)
 
 	if (isG192Format == 0)
 	{
-		char *argv[] = { "EVS_dec","-MIME",strSample,NULL, dec->f_synth };
+		char *argv[] = { "EVS_dec","-MIME",strSample,(char*)dec->f_stream,(char*)dec->f_synth };
 		int argc = sizeof(argv) / sizeof(argv[0]);
 		io_ini_dec_fx(argc, argv, &dec->f_stream, &dec->f_synth,
 			&dec->quietMode,
@@ -94,7 +94,7 @@ int InitDecoder(EvsDecoderContext* dec,int sample,int bitRate,int isG192Format)
 	}
 	else 
 	{
-		char *argv[] = { "EVS_dec",strSample,NULL, dec->f_synth };
+		char *argv[] = { "EVS_dec",strSample,(char*)dec->f_stream,(char*)dec->f_synth };
 		int argc = sizeof(argv) / sizeof(argv[0]);
 		io_ini_dec_fx(argc, argv, &dec->f_stream, &dec->f_synth,
 			&dec->quietMode,
@@ -162,16 +162,24 @@ int InitDecoder(EvsDecoderContext* dec,int sample,int bitRate,int isG192Format)
     *------------------------------------------------------------------------------------------*/
 int EvsStartDecoder(EvsDecoderContext *dec,const char* data,const int len)
 {
-
     Word16   output_frame;
-    {
-        /* output frame length */
-        output_frame = dec->st_fx->output_frame_fx;
-        dec->buf->size = output_frame;
+    Word16   ret  = 0;
+    
+    /* output frame length */
+    output_frame = dec->st_fx->output_frame_fx;
+    dec->buf->size = output_frame;
 
-        /*----- loop: decode-a-frame -----*/
-        if( dec->st_fx->bitstreamformat==G192 ? read_indices_fx_real( dec->st_fx,(Word16*)data,(Word16)len, 0 ) : read_indices_mime_real( dec->st_fx,(Word8*)data,(Word16)len, 0) )
-        {
+    /*----- loop: decode-a-frame -----*/
+	if (dec->st_fx->bitstreamformat == G192)
+		ret = read_indices_fx_real(dec->st_fx, (Word16*)data, (Word16)len, 0);
+	else
+		ret = read_indices_mime_real(dec->st_fx, (Word8*)data, (Word16)len, 0);
+
+    if (ret < 0){
+		dec->buf->size = -1;
+        return ret;
+    }
+        
 #if (WMOPS)
             fwc();
             Reset_WMOPS_counter();
@@ -212,10 +220,9 @@ int EvsStartDecoder(EvsDecoderContext *dec,const char* data,const int len)
 
              /* write the synthesized signal into output file */
              /* do final delay compensation */
-             /* if( dec->dec_delay == 0 )
+              /*if( dec->dec_delay == 0 )
               {
                    fwrite(dec->buf->data, sizeof(Word16), output_frame, dec->f_synth );
-                   printf("222222222222222\n");
               }
               else
                {
@@ -231,9 +238,7 @@ int EvsStartDecoder(EvsDecoderContext *dec,const char* data,const int len)
                      }
                }*/
             dec->frame++;
-        }
-    }
-
+        
     return 0;
 }
 

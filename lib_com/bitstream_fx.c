@@ -1352,9 +1352,6 @@ Word16 read_indices_fx_real(                /* o  : 1 = reading OK, 0 = problem 
 
 		 UWord16 offsetSize = headerSize + sizeof(unsigned short) * 1;
 
-		 pt_stream = stream;
-
-		 memcpy(pt_stream, data + offsetSize, num_bits* sizeof(unsigned short));
        
         /* convert the frame length to total bitrate */
         total_brate = (long)(num_bits* 50);
@@ -1365,7 +1362,8 @@ Word16 read_indices_fx_real(                /* o  : 1 = reading OK, 0 = problem 
         if( num_bits > MAX_BITS_PER_FRAME )
         {
             fprintf(stderr, "\nError, too large G.192 frame (size(%d))! Exiting ! \n", num_bits);
-            exit(-1);
+            //exit(-1);
+            return -1;
         }
 
         /*  verify that a  valid  num bits value  is present in the G.192 file */
@@ -1373,8 +1371,13 @@ Word16 read_indices_fx_real(                /* o  : 1 = reading OK, 0 = problem 
         if( rate2EVSmode(total_brate) < 0 ) /* negative value means that a valid rate was not found */
         {
             fprintf(stderr, "\nError, illegal bit rate (%d) in  the  G.192 frame ! Exiting ! \n", total_brate);
-            exit(-1);
+           // exit(-1);
+            return -1;
         }
+
+         pt_stream = stream;
+
+         memcpy(pt_stream, data + offsetSize, num_bits* sizeof(unsigned short));
         
 
     }
@@ -1967,13 +1970,15 @@ Word16 read_indices_mime_real(                /* o  : 1 = reading OK, 0 = proble
         {
             /* incorrect FT header */
             fprintf(stderr, "\nError in EVS  FT ToC header(%02x) ! ",header);
-            exit(-1);
+          //  exit(-1);
+            return -1;
         }
         else if( (isAMRWB_IOmode != 0) && ( (num_bits < 0) ||  ((header & 0x80) > 0) || ((header & 0x40) > 0) )  )  /* AMRWBIO */
         {
             /* incorrect IO FT header */
             fprintf(stderr, "\nError in EVS(AMRWBIO)  FT ToC header(%02x) ! ",header);
-            exit(-1);
+           // exit(-1);
+            return -1;
         }
     }
     else
@@ -1983,7 +1988,8 @@ Word16 read_indices_mime_real(                /* o  : 1 = reading OK, 0 = proble
         {
             /* incorrect FT header */
             fprintf(stderr, "\nError in AMRWB RFC4867  Toc(FT)  header(%02x) !", header);
-            exit(-1);
+            //exit(-1);
+            return -1;
         }
     }
 

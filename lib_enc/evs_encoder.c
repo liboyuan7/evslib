@@ -67,6 +67,7 @@ int InitEncoder(EvsEncoderContext *enc, int sample, int bitRate, char* codec, in
         return -1;
     }
 
+    enc->f_input =NULL;
     enc->f_rate = NULL;                                        
     enc->f_bwidth = NULL;                                      
     enc->f_rf = NULL;
@@ -92,14 +93,14 @@ int InitEncoder(EvsEncoderContext *enc, int sample, int bitRate, char* codec, in
 	sprintf(bitRateParam, "%d", bitRate);
 
 	if (isG192Format == 0) {
-		char *argv[] = {"Evs_cod","-MAX_BAND",codec,"-MIME",bitRateParam,strSample,NULL,enc->f_stream};
+		char *argv[] = {"Evs_cod","-MAX_BAND",codec,"-MIME",bitRateParam,strSample,(char*)enc->f_input,(char*)enc->f_stream};
 		int argc = sizeof(argv) / sizeof(argv[0]);
 		io_ini_enc_fx(argc, argv, &enc->f_input, &enc->f_stream, &enc->f_rate, &enc->f_bwidth,
 			&enc->f_rf,
 			&enc->quietMode, &enc->noDelayCmp, enc->st_fx);
 	}
 	else {
-		char *argv[] = {"Evs_cod","-MAX_BAND",codec,bitRateParam,strSample,NULL,enc->f_stream};
+		char *argv[] = {"Evs_cod","-MAX_BAND",codec,bitRateParam,strSample,(char*)enc->f_input,(char*)enc->f_stream};
 		int argc = sizeof(argv) / sizeof(argv[0]);
 		io_ini_enc_fx(argc, argv, &enc->f_input, &enc->f_stream, &enc->f_rate, &enc->f_bwidth,
 			&enc->f_rf,
