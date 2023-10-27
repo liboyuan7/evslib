@@ -24,7 +24,7 @@ endif
 # C compiler flags
 CFLAGS   += -pedantic -Wcast-qual -Wall -W -Wextra -Wno-long-long     \
             -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes  \
-            -Werror-implicit-function-declaration 
+            -Werror-implicit-function-declaration -fPIE
 
 ifeq "$(RELEASE)" "1"
 CFLAGS   += -DRELEASE
