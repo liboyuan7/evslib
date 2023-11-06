@@ -27,7 +27,7 @@ long frame = 0;                 /* Counter of frames */
 
 int main(int argc, char *argv[])
 {
-#if 0
+#if 1
     Decoder_State_fx  *st_fx;                             /* decoder state structure     */
     Word16            zero_pad, dec_delay,output_frame;
     FILE              *f_stream;                          /* input bitstream file        */
@@ -65,7 +65,6 @@ int main(int argc, char *argv[])
 
     st_fx->bit_stream_fx = bit_stream;
 
-	
     io_ini_dec_fx( argc, argv, &f_stream, &f_synth,
                    &quietMode,
                    &noDelayCmp,
@@ -110,7 +109,6 @@ int main(int argc, char *argv[])
 
         if( noDelayCmp == 0)
         {
-			fprintf(stdout, "\n--noDelayCmp == 0 --\n\n");
             /* calculate the compensation (decoded signal aligned with original signal) */
             /* the number of first output samples will be reduced by this amount */
             dec_delay = NS2SA_fx2(st_fx->output_Fs_fx, get_delay_fx(DEC, st_fx->output_Fs_fx));
@@ -268,18 +266,17 @@ int main(int argc, char *argv[])
    }
 
     printf("InitDecoder...\n");
-    InitDecoder(dec,8000,9600,0);
+    InitDecoder(dec);
     int n_samples = 0;
 	int input_frame = dec->st_fx->output_frame_fx;
     char data[L_FRAME48k];                              /* Input buffer */
     DecoderDataBuf buf;
     fprintf( stdout, "\n------ Running the decoder:%d ------\n\n",input_frame);
 	//while(dec->st_fx->bitstreamformat == G192 ? read_indices_fx(dec->st_fx, dec->f_stream, 0) : read_indices_mime(dec->st_fx, dec->f_stream, 0))
-    while( (n_samples = (short)fread(data, sizeof(UWord8), 1, f_input)) > 0 )
+    while( (n_samples = (short)fread(data, sizeof(unsigned short), input_frame, f_input)) > 0 )
     {
-	//fprintf(stdout, "\n------ Running the n_samples:%d ------\n\n", n_samples);
        
-        EvsStartDecoder(dec, data, n_samples,&buf);
+        StartDecoder(dec, data, n_samples,&buf);
     }
 
    

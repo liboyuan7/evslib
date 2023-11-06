@@ -8,7 +8,6 @@
 #include <string.h>
 #include <assert.h>
 #include <sys/stat.h>
-#include <stdbool.h>
 
 #include "options.h"
 #include "stl.h"
@@ -20,8 +19,8 @@
 
 typedef struct EncoderDataBuf
 {
-   char data[(2+MAX_BITS_PER_FRAME)*4];
-   int size;
+   Word16 data[2+MAX_BITS_PER_FRAME];
+   Word16 size;
 }EncoderDataBuf;
 
 typedef struct EvsEncoderContext
@@ -36,13 +35,13 @@ typedef struct EvsEncoderContext
     FILE *f_rf ;                                    /* Channel aware configuration file */
 	FILE *f_stream;                     /*output bitstream file*/
 	Encoder_State_fx * st_fx;
-	EncoderDataBuf* buf;
+
 }EvsEncoderContext;
 
 
 EvsEncoderContext* NewEvsEncoder();
-int InitEncoder(EvsEncoderContext *enc,int sample,int bitRate, char* codec, int isG192Format);//默认设置为MIME
-int EvsStartEncoder(EvsEncoderContext *enc,const char* data,const int len);
+int InitEncoder(EvsEncoderContext *enc);
+int StartEncoder(EvsEncoderContext *enc,const char* data,const int len,EncoderDataBuf* buf);
 int StopEncoder(EvsEncoderContext *enc);
 int UnitTestEvsEncoder();
 

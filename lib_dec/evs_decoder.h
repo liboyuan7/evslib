@@ -10,7 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <assert.h>
-#include <stdbool.h>
+
 #include "options.h"
 #include "stl.h"
 #include "stat_dec_fx.h"
@@ -21,8 +21,8 @@
 #include "EvsRXlib.h"
 
 typedef struct DecoderDataBuf{
-   Word16        data[L_FRAME48k];
-   short size;
+   char            data[L_FRAME48k];
+   int size;
 }DecoderDataBuf;
 
 typedef struct EvsDecoderContext
@@ -31,20 +31,17 @@ typedef struct EvsDecoderContext
 	long frame;
 	Word16 quietMode;
 	Word16 noDelayCmp;
-	Word16 dec_delay;
-	Word16 zero_pad;
 	UWord16           bit_stream[MAX_BITS_PER_FRAME + 16];
 	char              *jbmTraceFileName ;           /* VOIP tracefile name         */
 	char              *jbmFECoffsetFileName;       /* FEC offset file name */
 	FILE *f_stream;                     /*input bitstream file*/
 	FILE *f_synth; 						/* output synthesis file     */
 	Decoder_State_fx * st_fx;
-	DecoderDataBuf* buf;
 }EvsDecoderContext;
 
 EvsDecoderContext* NewEvsDecoder();
-int InitDecoder(EvsDecoderContext *dec,int sample,int bitRate, int isG192Format);
-int EvsStartDecoder(EvsDecoderContext *dec,const char* data,const int len);
+int InitDecoder(EvsDecoderContext *dec);
+int StartDecoder(EvsDecoderContext *dec,const char* data,const int len,DecoderDataBuf* buf);
 int StopDecoder(EvsDecoderContext *dec);
 int UnitTestEvsDecoder();
 
